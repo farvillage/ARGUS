@@ -2,21 +2,25 @@
 
 **A pre-sign security linter for unsigned EVM transactions.**
 
-`ARGUS` inspects a transaction *before* a wallet signs it and flags wallet drainers, permit
-phishing, EIP-7702 delegation hijacks, dangerous bytecode and asymmetric asset drains. It runs
-as a CLI, in CI (SARIF for GitHub code scanning) or from any IDE with `python3 -m argus`, and it
-works fully offline against fixtures, with no RPC key.
+`ARGUS` inspects a transaction *before* a wallet signs it and flags
+wallet drainers, permit phishing, EIP-7702 delegation hijacks, dangerous
+bytecode, and asymmetric asset drains. It runs as a CLI, in CI (SARIF
+for GitHub code scanning), or from any IDE using `python3 -m argus`. It
+also works fully offline against fixtures, with no RPC key.
 
 ## Why
 
-Most drained wallets were not hacked. The owner signed something they could not read. Calldata is
-opaque, permits are off-chain, and since EIP-7702 a single signature can hand an EOA's code
-execution to an arbitrary contract. `argus` is a deterministic checkpoint between "build the
-payload" and "sign it".
+Most drained wallets were not hacked. The owner signed something they
+could not read. Calldata is opaque, permits are off-chain, and since
+EIP-7702, a single signature can hand an EOA's code execution to an
+arbitrary contract.
+
+`ARGUS` is a deterministic checkpoint between **building the payload**
+and **signing it**.
 
 ## Architecture
 
-```mermaid
+``` mermaid
 flowchart LR
     P[Unsigned tx JSON<br/>from, to, data, value,<br/>chainId, authorizationList] --> L[load_payload<br/>strict Pydantic v2]
     L --> D[decode_calldata<br/>eth-abi]
@@ -28,19 +32,22 @@ flowchart LR
     B[disassemble_opcodes<br/>pure Python, PUSH-aware] --> C
     C --> E[Rule engine<br/>ARG001 - ARG006]
     E --> RP[LintReport<br/>findings + risk score]
-    C -.->|--explain| M[ml_scorer<br/>features -> ONNX RF -> SHAP]
+    C -.->|--explain| M[ml_scorer<br/>features -> ONNX model -> SHAP]
     M -.-> RP
     RP --> F[Formatters<br/>rich / json / SARIF 2.1.0]
     RP --> X[Exit code<br/>1 if finding >= --fail-on]
 ```
 
-## Quickstart (any IDE, no PATH setup)
+## Quickstart
 
-```bash
+The following setup works in any IDE and does not require adding a
+command to your system `PATH`.
+
+``` bash
 python3 -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"              # core + pytest + ruff
-pip install -e ".[ml]"               # optional: ONNX + SHAP explanations
+pip install -e ".[dev]"              # Core dependencies, pytest, and Ruff
+pip install -e ".[ml]"               # Optional: ONNX and SHAP explanations
 
 python3 -m argus rules
 python3 -m argus check examples/permit2_phishing.json --offline
@@ -48,157 +55,267 @@ python3 -m argus check examples/safe_uniswap_swap.json --offline
 python3 -m argus check examples/proxy_delegatecall_drainer.json --offline --explain
 ```
 
-Every command works identically as `argus ...` once installed. In an IDE, run
-`python3 -m argus` as the module. Running `pytest` (or `python3 -m pytest`) executes the suite.
+Once installed, commands can also be run using `argus ...`. In an IDE,
+run `python3 -m argus` as a module. Run the test suite with `pytest` or
+`python3 -m pytest`.
 
 ## Usage
 
-```text
+``` text
 argus check <payload.json> [--rpc-url URL] [--offline] [--explain]
              [--format rich|json|sarif] [--fail-on low|medium|high|critical]
 argus rules
 ```
 
-| Exit code | Meaning                                                          |
-|-----------|------------------------------------------------------------------|
-| `0`       | No finding at or above `--fail-on` (default `high`)              |
-| `1`       | At least one finding at or above `--fail-on`                     |
-| `2`       | Operational error (bad payload, no backend selected, RPC error)  |
+  -----------------------------------------------------------------------
+  Exit code                           Meaning
+  ----------------------------------- -----------------------------------
+  `0`                                 No finding at or above `--fail-on`
+                                      (default: `high`).
 
-`--rpc-url` can also be supplied through the `ARGUS_RPC_URL` environment variable.
+  `1`                                 At least one finding at or above
+                                      `--fail-on`.
+
+  `2`                                 Operational error, such as an
+                                      invalid payload, no backend
+                                      selected, or an RPC error.
+  -----------------------------------------------------------------------
+
+The RPC URL can also be supplied through the `ARGUS_RPC_URL` environment
+variable.
 
 ## Payload format
 
-A flat JSON object with the unsigned-transaction fields. Quantities accept ints or `0x` hex.
+The payload is a flat JSON object containing unsigned-transaction
+fields. Quantity values accept integers or hexadecimal strings prefixed
+with `0x`.
 
-```json
+``` json
 {
   "chainId": 1,
   "from": "0x...",
   "to": "0x...",
   "value": "0x0",
   "data": "0x...",
-  "authorizationList": [{ "chainId": "0x0", "address": "0x...", "nonce": "0x1" }],
-  "_mock_context": { "is_contract": true, "is_verified": false, "deployment_age_blocks": 37 }
+  "authorizationList": [
+    {
+      "chainId": "0x0",
+      "address": "0x...",
+      "nonce": "0x1"
+    }
+  ],
+  "_mock_context": {
+    "is_contract": true,
+    "is_verified": false,
+    "deployment_age_blocks": 37
+  }
 }
 ```
 
-`_mock_context` feeds the offline simulator: target metadata, per-address metadata, simulated
-state diffs, and an optional `runtime_bytecode` that is disassembled by the pure-Python
+`_mock_context` supplies data to the offline simulator. It can contain
+target metadata, per-address metadata, simulated state diffs, and
+optional `runtime_bytecode`, which is disassembled by the pure-Python
 disassembler.
 
-## Rules
+## Detection rules
 
-| ID       | Severity        | Detects                                                                 |
-|----------|-----------------|-------------------------------------------------------------------------|
-| `ARG001` | HIGH / CRITICAL | Unbounded `approve` (>= 2^255) or `setApprovalForAll(true)`; CRITICAL for EOA/unverified spender |
-| `ARG002` | CRITICAL        | EIP-2612 `permit` to an EOA, or a deadline more than 30 days ahead      |
-| `ARG003` | CRITICAL        | EIP-7702 delegation to an unverified/unknown contract (flags `chain_id = 0` replayability) |
-| `ARG004` | HIGH            | Target deployed < 500 blocks ago and unverified                         |
-| `ARG005` | HIGH            | Non-standard `DELEGATECALL` (no EIP-1967 slot) or `SELFDESTRUCT` in unverified bytecode |
-| `ARG006` | CRITICAL        | Net outflow of ETH/ERC-20 with no inbound assets or receipt tokens      |
+  ----------------------------------------------------------------------------
+  Rule ID                 Severity                Detects
+  ----------------------- ----------------------- ----------------------------
+  `ARG001`                HIGH / CRITICAL         Unbounded `approve`
+                                                  (`>= 2^255`) or
+                                                  `setApprovalForAll(true)`.
+                                                  Severity is CRITICAL for an
+                                                  EOA or unverified spender.
 
-The deterministic risk score is the sum of severity weights (LOW 5, MEDIUM 15, HIGH 35,
-CRITICAL 60), capped at 100.
+  `ARG002`                CRITICAL                EIP-2612 `permit` to an EOA,
+                                                  or a deadline more than 30
+                                                  days in the future.
+
+  `ARG003`                CRITICAL                EIP-7702 delegation to an
+                                                  unverified or unknown
+                                                  contract; also flags
+                                                  `chain_id = 0`
+                                                  replayability.
+
+  `ARG004`                HIGH                    Target deployed fewer than
+                                                  500 blocks ago and not
+                                                  verified.
+
+  `ARG005`                HIGH                    Non-standard `DELEGATECALL`
+                                                  (without an EIP-1967 slot)
+                                                  or `SELFDESTRUCT` in
+                                                  unverified bytecode.
+
+  `ARG006`                CRITICAL                Net outflow of ETH/ERC-20
+                                                  assets without inbound
+                                                  assets or receipt tokens.
+  ----------------------------------------------------------------------------
+
+The deterministic risk score is the sum of severity weights, capped at
+100:
+
+  Severity     Weight
+  ---------- --------
+  LOW               5
+  MEDIUM           15
+  HIGH             35
+  CRITICAL         60
 
 ## Sample output
 
-<!-- Abridged illustration; replace with a real capture from your terminal. -->
-
-```text
+``` text
 $ python3 -m argus check examples/permit2_phishing.json --offline
 ╭──────────────────────────── Decoded Call ─────────────────────────────╮
-│ From      0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc                    │
-│ To        0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48                    │
-│ Function  permit                                                        │
-│   spender 0xbadc0de0badc0de0badc0de0badc0de0badc0de0                    │
-│   value   1157920892373161954235709850086879078532699846656405640394…   │
-╰─────────────────────────────────────────────────────────────────────────╯
- Rule    Severity  Title                              Details / Remediation
- ARG002  CRITICAL  EIP-2612 permit phishing signature  Permit signature looks like phishing:
-                                                       spender is an EOA; deadline is more
-                                                       than 30 days ahead.
-                                                       Fix: Do not sign. ...
+│ From      0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc                  │
+│ To        0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48                  │
+│ Function  permit                                                      │
+│   spender 0xbadc0de0badc0de0badc0de0badc0de0badc0de0                  │
+│   value   1157920892373161954235709850086879078532699846656405640394… │
+╰───────────────────────────────────────────────────────────────────────╯
+Rule    Severity  Title                               Details / Remediation
+ARG002  CRITICAL  EIP-2612 permit phishing signature  Permit signature looks like phishing:
+                                                      spender is an EOA; deadline is more
+                                                      than 30 days ahead.
+                                                      Fix: Do not sign. ...
 ╭─────────────────────────────── Verdict ────────────────────────────────╮
-│                 DO NOT SIGN - deterministic risk score 60/100            │
-╰─────────────────────────────────────────────────────────────────────────╯
+│          DO NOT SIGN - deterministic risk score 60/100                │
+╰───────────────────────────────────────────────────────────────────────╯
 $ echo $?
 1
 ```
 
-## Explainable AI scorer (`--explain`)
+## Explainable AI scorer and real-data training
 
-Rules are deterministic and auditable. `--explain` adds a second, independent opinion.
+The detection rules are deterministic and auditable. The optional
+`--explain` flag adds an independent machine-learning assessment.
 
-1. `extract_features` derives 8 behavioural features from the simulation (unbounded approval,
-   untrusted spender, permit deadline horizon, untrusted 7702 delegate, unverified target,
-   contract freshness, dangerous opcodes, asymmetric outflow). It never reads rule verdicts, so
-   there is no label leakage.
-2. A `RandomForestClassifier` trained on a **seeded synthetic dataset** (benign swaps vs. five
-   drainer archetypes with stealth dropout) is exported to ONNX with `skl2onnx`.
-3. `onnxruntime` scores a transaction on a single CPU thread (`scripts/train_model.py` prints the median latency; the test suite asserts < 5 ms).
-4. `shap.TreeExplainer` attributes the probability to each feature; the CLI renders the bars.
+### Feature extraction
 
-The model is created automatically on first use. To train and inspect it explicitly:
+`extract_features` derives eight behavioral features from the
+simulation:
 
-```bash
-python3 scripts/train_model.py        # prints hold-out metrics, ONNX parity, latency
+1.  Unbounded approval.
+2.  Untrusted spender.
+3.  Permit deadline horizon.
+4.  Untrusted EIP-7702 delegate.
+5.  Unverified target.
+6.  Contract freshness.
+7.  Dangerous opcodes.
+8.  Asymmetric outflow.
+
+### Multi-model cross-validation and ONNX export
+
+`ARGUS` supports benchmarking the following models using Stratified
+K-Fold cross-validation:
+
+-   Random Forest (`rf`)
+-   HistGradientBoosting (`hist_gbdt`)
+-   XGBoost (`xgboost`)
+
+The best-performing model is exported to ONNX for CPU inference, with a
+target inference time below 5 ms.
+
+### Real-world incident harvesting
+
+The training pipeline can use historical exploit and drainer transaction
+hashes parsed from `DeFi-Hack-Chronicle`, combined with mainnet
+user-traffic data. This process requires access to an RPC endpoint and
+an Etherscan V2 API key.
+
+#### Configure credentials
+
+Create a local `.env` file in the project root:
+
+``` ini
+ETHERSCAN_API_KEY="your_etherscan_key_here"
+ARGUS_RPC_URL="https://ethereum-rpc.publicnode.com"
 ```
 
-> The training data is synthetic. The ML score demonstrates an explainability pipeline and should
-> complement, never replace, the deterministic rules. Retrain on labelled real-world incidents
-> before relying on it.
+#### Run the harvesting and training pipeline
+
+``` bash
+# 1. Clone DeFi-Hack-Chronicle and parse seed transactions
+git clone --depth 1 https://github.com/DeFiHackLabs/DeFi-Hack-Chronicle.git /tmp/DeFi-Hack-Chronicle
+python3 scripts/parse_chronicle.py --chronicle-dir /tmp/DeFi-Hack-Chronicle
+
+# 2. Harvest real mainnet transactions
+python3 scripts/harvest_real_data.py --seeds data/chronicle_seeds.json --max-malicious 90
+
+# 3. Benchmark models, select the winner, and export it to ONNX
+python3 scripts/train_model.py --dataset data/real_transactions.csv --model auto
+```
 
 ## GitHub code scanning (SARIF)
 
-```yaml
-- run: python3 -m argus check tx/payload.json --offline --format sarif > argus.sarif || true
-- uses: github/codeql-action/upload-sarif@v3
-  with: { sarif_file: argus.sarif }
+The CLI can generate SARIF output for GitHub code scanning. Add the
+following steps to a GitHub Actions workflow:
+
+``` yaml
+- name: Run ARGUS
+  run: python3 -m argus check tx/payload.json --offline --format sarif > argus.sarif || true
+
+- name: Upload SARIF results
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: argus.sarif
 ```
 
 ## Testing
 
-```bash
+Run the test suite with:
+
+``` bash
 pytest -q
 ```
 
-The suite covers every rule (`ARG001`-`ARG006`) including boundary conditions, PUSH-skipping
-disassembly, EIP-1967 pairing, calldata decoding, SARIF structure, CLI exit codes, the CCIP-Read
-hardening, and (when the `ml` extra is installed) the ONNX/SHAP pipeline.
+The suite covers every rule (`ARG001`--`ARG006`), including boundary
+conditions, PUSH-skipping disassembly, EIP-1967 pairing, calldata
+decoding, SARIF structure, CLI exit codes, CCIP-Read hardening, and the
+ONNX/SHAP pipeline.
 
 ## Security hardening
 
-**Pre-sign isolation.** `ARGUS` is designed to sit *before* the signer:
+### Pre-sign isolation
 
-- It never holds keys and never signs, broadcasts or sends transactions. The only RPC methods
-  used are read-only: `eth_getBlockByNumber`, `eth_getCode`, `eth_call`, `debug_traceCall`.
-- `--offline` performs zero network I/O, so payloads can be linted on an air-gapped machine.
-- Payloads are untrusted input: parsed with strict Pydantic v2 models, addresses validated
-  (checksum-checked when mixed-case), hex normalised, malformed calldata reported rather than
-  trusted. No `eval`, no shelling out, no pickle: the ML model is ONNX, and the SHAP forest is
-  retrained deterministically from a recorded seed instead of deserialising an artefact.
-- Unknown or missing evidence fails safe: an unknown spender or delegate counts as unverified.
-  Rules that need a trace (`ARG006`) stay silent and say so when no trace is available, rather
-  than guessing.
+`ARGUS` runs before the signer and:
 
-**`OffchainLookup` / CCIP-Read SSRF (CVE-2026-40072).** EIP-3668 lets a contract revert with
-`OffchainLookup(urls, ...)`, instructing the client to fetch attacker-chosen URLs. A linter that
-simulates hostile contracts would otherwise make *your* host issue those requests (SSRF into
-internal services or cloud metadata endpoints). `LiveRPCSimulator` therefore sets
-`provider.global_ccip_read_enabled = False` at construction, asserts it, and also passes
-`ccip_read_enabled=False` to every `eth_call`. A unit test pins this behaviour. The RPC URL
-itself is restricted to absolute `http(s)` URLs.
+-   Never holds keys and never signs, broadcasts, or sends transactions.
+-   Uses only read-only RPC calls: `eth_getBlockByNumber`,
+    `eth_getCode`, `eth_call`, and `debug_traceCall`.
+-   Performs zero network I/O when running with `--offline`.
+-   Avoids pickle deserialization. The ML model uses ONNX, while SHAP
+    explanations are reconstructed deterministically from compressed
+    NumPy arrays or safe XGBoost JSON sidecars.
+
+### OffchainLookup / CCIP-Read SSRF mitigation
+
+`LiveRPCSimulator` disables CCIP-Read globally using
+`global_ccip_read_enabled = False` and passes `ccip_read_enabled=False`
+to every `eth_call`. This is intended to prevent malicious contracts
+from triggering SSRF requests through EIP-3668.
 
 ## Limitations
 
-- Source-code verification and contract age are not observable over plain RPC. In live mode a
-  contract counts as verified only if listed in `ARGUS_VERIFIED_ADDRESSES`, and `ARG004` needs
-  deployment age from an explorer or archive node (offline fixtures supply it).
-- `debug_traceCall` is required for state diffs; many public RPC providers disable it.
-- Decoding covers the selectors listed above; Permit2's own typed-data flows are out of scope.
-- A clean report is not a guarantee of safety. `ARGUS` reduces risk; it is not an audit.
+-   Source-code verification and contract age checks require explorer or
+    archive data. Offline fixtures provide this information; live mode
+    checks `ARGUS_VERIFIED_ADDRESSES`.
+-   `debug_traceCall` is required for full state diffs.
+-   A clean report is not a guarantee of safety. `ARGUS` reduces risk
+    but is not a substitute for a formal audit.
 
 ## License
 
 MIT
+
+------------------------------------------------------------------------
+
+## Save and commit the README
+
+Save this content as `README.md`, then commit and push the update:
+
+``` bash
+git add README.md
+git commit -m "docs: update README with real-world DeFi-Hack-Chronicle harvesting and multi-model benchmark"
+git push
+```
