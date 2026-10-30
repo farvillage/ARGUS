@@ -1,8 +1,8 @@
-# argus
+# ARGUS
 
 **A pre-sign security linter for unsigned EVM transactions.**
 
-`argus` inspects a transaction *before* a wallet signs it and flags wallet drainers, permit
+`ARGUS` inspects a transaction *before* a wallet signs it and flags wallet drainers, permit
 phishing, EIP-7702 delegation hijacks, dangerous bytecode and asymmetric asset drains. It runs
 as a CLI, in CI (SARIF for GitHub code scanning) or from any IDE with `python3 -m argus`, and it
 works fully offline against fixtures, with no RPC key.
@@ -169,7 +169,7 @@ hardening, and (when the `ml` extra is installed) the ONNX/SHAP pipeline.
 
 ## Security hardening
 
-**Pre-sign isolation.** `argus` is designed to sit *before* the signer:
+**Pre-sign isolation.** `ARGUS` is designed to sit *before* the signer:
 
 - It never holds keys and never signs, broadcasts or sends transactions. The only RPC methods
   used are read-only: `eth_getBlockByNumber`, `eth_getCode`, `eth_call`, `debug_traceCall`.
@@ -197,7 +197,7 @@ itself is restricted to absolute `http(s)` URLs.
   deployment age from an explorer or archive node (offline fixtures supply it).
 - `debug_traceCall` is required for state diffs; many public RPC providers disable it.
 - Decoding covers the selectors listed above; Permit2's own typed-data flows are out of scope.
-- A clean report is not a guarantee of safety. `argus` reduces risk; it is not an audit.
+- A clean report is not a guarantee of safety. `ARGUS` reduces risk; it is not an audit.
 
 ## License
 
