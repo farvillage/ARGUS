@@ -1,155 +1,196 @@
 #!/usr/bin/env python3
-"""Train the ARGUS risk model on synthetic or CSV data, evaluate it, and export to ONNX.
+"""Benchmark RF, HistGBDT, and XGBoost on synthetic or real CSV data and export to ONNX.
 
 Usage:
-    python3 scripts/train_model.py [--seed 1337] [--samples 6000] [--dataset PATH]
+    python3 scripts/train_model.py [--dataset data/real_transactions.csv] [--model auto]
 """
 
-# Standard library imports sorted alphabetically to satisfy Ruff rule I001
 import argparse
 import csv
+import os
 import sys
 from pathlib import Path
 
-# Add local `src` directory to sys.path so `argus` resolves without global install
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-# Third-party scientific & ONNX imports (`noqa: E402` allows post-sys.path imports)
 import numpy as np  # noqa: E402
 import onnxruntime as ort  # noqa: E402
 from sklearn.metrics import (  # noqa: E402
     accuracy_score,
+    average_precision_score,
+    brier_score_loss,
+    f1_score,
     precision_score,
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split  # noqa: E402
+from sklearn.model_selection import StratifiedKFold  # noqa: E402
 
-# First-party ARGUS ML pipeline helpers sorted per Ruff isort conventions
 from argus.ml_scorer import (  # noqa: E402
     DEFAULT_SAMPLES,
     DEFAULT_SEED,
     FEATURE_NAMES,
     OnnxRiskScorer,
-    build_forest,
+    build_estimator,
     default_model_path,
     export_onnx,
     generate_dataset,
-    train_forest,
+    xgboost_available,
 )
+
+
+def _load_dotenv() -> None:
+    """Load KEY=VALUE pairs from local `.env` using stdlib only."""
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    if not env_path.is_file():
+        return
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, val = line.split("=", 1)
+            os.environ.setdefault(key.strip(), val.strip().strip("\"'"))
 
 
 def load_csv_dataset(csv_path: Path) -> tuple[np.ndarray, np.ndarray]:
     """Load 8 behavioral features and binary labels from a harvested CSV file."""
     feature_rows: list[list[float]] = []
     labels: list[int] = []
-
-    # Read UTF-8 CSV rows using Python's built-in DictReader (no pandas required)
     with csv_path.open("r", encoding="utf-8", newline="") as csv_file:
         reader = csv.DictReader(csv_file)
         for row in reader:
-            # Extract the 8 features in exact FEATURE_NAMES order as floats
             feature_rows.append([float(row[name]) for name in FEATURE_NAMES])
-            # Parse the ground-truth class label (0 = benign, 1 = malicious)
             labels.append(int(row["label"]))
+    return np.asarray(feature_rows, dtype=np.float32), np.asarray(labels, dtype=np.int64)
 
-    # Convert Python lists into contiguous NumPy arrays expected by scikit-learn
-    x = np.asarray(feature_rows, dtype=np.float32)
-    y = np.asarray(labels, dtype=np.int64)
-    return x, y
+
+def evaluate_cv(
+    model_type: str, x: np.ndarray, y: np.ndarray, seed: int, n_splits: int
+) -> dict[str, float]:
+    """Compute out-of-fold Stratified K-Fold metrics for a candidate architecture."""
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    oof_probs = np.zeros(len(y), dtype=np.float64)
+    oof_preds = np.zeros(len(y), dtype=np.int64)
+
+    for train_idx, val_idx in skf.split(x, y):
+        y_tr = y[train_idx]
+        pos = max(int(y_tr.sum()), 1)
+        neg = max(len(y_tr) - pos, 1)
+        clf = build_estimator(model_type, seed=seed, pos_weight=neg / pos)
+        clf.fit(x[train_idx], y_tr)
+        oof_probs[val_idx] = clf.predict_proba(x[val_idx])[:, 1]
+        oof_preds[val_idx] = (oof_probs[val_idx] >= 0.5).astype(np.int64)
+
+    return {
+        "pr_auc": float(average_precision_score(y, oof_probs)),
+        "roc_auc": float(roc_auc_score(y, oof_probs)),
+        "f1": float(f1_score(y, oof_preds, zero_division=0)),
+        "precision": float(precision_score(y, oof_preds, zero_division=0)),
+        "recall": float(recall_score(y, oof_preds, zero_division=0)),
+        "accuracy": float(accuracy_score(y, oof_preds)),
+        "brier": float(brier_score_loss(y, oof_probs)),
+    }
 
 
 def main() -> int:
-    """Train, evaluate, verify ONNX parity, and benchmark inference latency."""
-    # Define command-line flags (all lines kept under 100 chars for Ruff E501)
+    _load_dotenv()
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Random seed.")
+    parser.add_argument("--samples", type=int, default=DEFAULT_SAMPLES, help="Synthetic samples.")
+    parser.add_argument("--output", type=Path, default=None, help="Destination .onnx path.")
+    parser.add_argument("--dataset", type=Path, default=None, help="Real harvested CSV path.")
     parser.add_argument(
-        "--seed",
-        type=int,
-        default=DEFAULT_SEED,
-        help="Random seed for reproducible synthetic data and forest training.",
-    )
-    parser.add_argument(
-        "--samples",
-        type=int,
-        default=DEFAULT_SAMPLES,
-        help="Number of synthetic transactions to generate when no CSV is given.",
-    )
-    parser.add_argument(
-        "--output",
-        type=Path,
-        default=None,
-        help="Destination path for the exported .onnx model artifact.",
-    )
-    parser.add_argument(
-        "--dataset",
-        type=Path,
-        default=None,
-        help="Optional path to a real harvested CSV dataset file.",
+        "--model",
+        choices=("auto", "rf", "hist_gbdt", "xgboost"),
+        default="auto",
+        help="Model architecture to export ('auto' picks highest CV PR-AUC).",
     )
     args = parser.parse_args()
-
-    # Resolve target ONNX file path (defaults to src/argus/data/risk_model.onnx)
     output = args.output or default_model_path()
 
-    # Step 1: Load real CSV data if provided and present; otherwise synthesize data
     use_real_csv = args.dataset is not None and args.dataset.exists()
     if use_real_csv:
-        print(f"Loading real-world CSV dataset from: {args.dataset}")
+        print(f"Loading real-world CSV dataset: {args.dataset}")
         x, y = load_csv_dataset(args.dataset)
     else:
         if args.dataset is not None:
-            print(
-                f"Warning: '{args.dataset}' not found. Falling back to synthetic data."
-            )
+            print(f"Warning: '{args.dataset}' not found. Falling back to synthetic data.")
         else:
             print("Using seeded synthetic dataset generator.")
         x, y = generate_dataset(n_samples=args.samples, seed=args.seed)
 
-    # Print dataset dimensions and class balance summary
-    joined_names = ", ".join(FEATURE_NAMES)
-    print(f"dataset: {x.shape[0]} samples x {x.shape[1]} features ({joined_names})")
-    print(f"malicious share: {y.mean():.1%}")
+    pos_count = int(y.sum())
+    neg_count = len(y) - pos_count
+    if pos_count < 2 or neg_count < 2:
+        print(
+            "error: dataset must contain at least 2 malicious and 2 benign rows.",
+            file=sys.stderr,
+        )
+        return 2
 
-    # Step 2: Evaluate generalization metrics on a stratified 20% hold-out split
-    x_train, x_test, y_train, y_test = train_test_split(
-        x, y, test_size=0.2, random_state=args.seed, stratify=y
+    print(f"dataset: {x.shape[0]} samples x {x.shape[1]} features | malicious: {y.mean():.1%}")
+
+    candidates = ["rf", "hist_gbdt"]
+    if xgboost_available():
+        candidates.append("xgboost")
+    elif args.model == "xgboost":
+        print(
+            "error: install xgboost and onnxmltools (`pip install -e '.[train]'`).",
+            file=sys.stderr,
+        )
+        return 2
+
+    to_run = candidates if args.model == "auto" else [args.model]
+    n_splits = min(5, pos_count, neg_count)
+    print(f"\nStratified {n_splits}-Fold Cross-Validation Benchmark:")
+    header = (
+        f"{'Model':<12} {'PR-AUC':>8} {'ROC-AUC':>8} "
+        f"{'F1':>8} {'Prec':>8} {'Rec':>8} {'Brier':>8}"
     )
-    evaluator = build_forest(args.seed).fit(x_train, y_train)
-    predictions = evaluator.predict(x_test)
-    probabilities = evaluator.predict_proba(x_test)[:, 1]
-    print(
-        "hold-out: "
-        f"accuracy={accuracy_score(y_test, predictions):.4f} "
-        f"precision={precision_score(y_test, predictions):.4f} "
-        f"recall={recall_score(y_test, predictions):.4f} "
-        f"roc_auc={roc_auc_score(y_test, probabilities):.4f}"
+    print(header)
+    print("-" * len(header))
+
+    scores: dict[str, dict[str, float]] = {}
+    for name in to_run:
+        metrics = evaluate_cv(name, x, y, args.seed, n_splits)
+        scores[name] = metrics
+        print(
+            f"{name:<12} {metrics['pr_auc']:>8.4f} {metrics['roc_auc']:>8.4f} "
+            f"{metrics['f1']:>8.4f} {metrics['precision']:>8.4f} "
+            f"{metrics['recall']:>8.4f} {metrics['brier']:>8.4f}"
+        )
+
+    winner = max(scores, key=lambda k: (scores[k]["pr_auc"], scores[k]["roc_auc"]))
+    print(f"\nSelected architecture: {winner}")
+
+    final_model = build_estimator(winner, seed=args.seed, pos_weight=neg_count / pos_count)
+    final_model.fit(x, y)
+
+    path = export_onnx(
+        final_model,
+        output,
+        seed=args.seed,
+        n_samples=len(y),
+        model_type=winner,
+        x_train=x if use_real_csv else None,
+        y_train=y if use_real_csv else None,
     )
+    print(f"Exported ONNX model -> {path}")
 
-    # Step 3: Fit the production Random Forest on the full dataset and export ONNX
-    if use_real_csv:
-        forest = build_forest(args.seed).fit(x, y)
-    else:
-        forest = train_forest(args.seed, args.samples)
-
-    path = export_onnx(forest, output, seed=args.seed, n_samples=len(y))
-    print(f"exported ONNX model -> {path}")
-
-    # Step 4: Verify numerical parity between ONNX Runtime and scikit-learn
     session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
     input_name = session.get_inputs()[0].name
+    out_names = [o.name for o in session.get_outputs()]
+    prob_name = "probabilities" if "probabilities" in out_names else out_names[-1]
     sample = x[: min(500, len(x))]
-    onnx_probs = session.run(["probabilities"], {input_name: sample})[0][:, 1]
-    sklearn_probs = forest.predict_proba(sample)[:, 1]
-    max_diff = float(np.max(np.abs(onnx_probs - sklearn_probs)))
-    print(f"ONNX vs sklearn max |diff| = {max_diff:.2e}")
+    onnx_probs = session.run([prob_name], {input_name: sample})[0][:, 1]
+    ref_probs = final_model.predict_proba(sample)[:, 1]
+    max_diff = float(np.max(np.abs(onnx_probs - ref_probs)))
+    print(f"ONNX vs native max |diff| = {max_diff:.2e}")
     if max_diff > 1e-4:
-        print("error: ONNX output diverges from scikit-learn", file=sys.stderr)
+        print("error: ONNX output diverges from native estimator", file=sys.stderr)
         return 1
 
-    # Step 5: Benchmark median single-thread CPU inference latency (< 5ms target)
     latency = OnnxRiskScorer(path).benchmark(200)
-    print(f"median inference latency = {latency:.3f} ms")
+    print(f"Median single-thread CPU latency = {latency:.3f} ms")
     return 0
 
 

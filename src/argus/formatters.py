@@ -16,7 +16,7 @@ from argus import __version__
 from argus.models import LintReport, Severity, SimulationContext
 from argus.rules import all_rules
 
-INFORMATION_URI = "https://github.com/ygorsoares/argus"
+INFORMATION_URI = "https://github.com/farvillage/ARGUS"
 
 _SEVERITY_STYLE: dict[Severity, str] = {
     Severity.LOW: "cyan",
@@ -24,6 +24,7 @@ _SEVERITY_STYLE: dict[Severity, str] = {
     Severity.HIGH: "red",
     Severity.CRITICAL: "bold white on red",
 }
+
 _UNLIMITED = 2**255
 
 
@@ -206,6 +207,7 @@ def render_sarif_report(report: LintReport, artifact_uri: str = "payload.json") 
     """Render a SARIF 2.1.0 log suitable for GitHub code scanning upload."""
     rules = all_rules()
     rule_index = {rule.rule_id: index for index, rule in enumerate(rules)}
+
     sarif_rules = []
     for rule in rules:
         top = max(rule.severities, key=lambda sev: sev.rank)

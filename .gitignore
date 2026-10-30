@@ -6,6 +6,7 @@
 
 # Ignore the local Python virtual environment
 .venv/
+.env
 
 # Ignore compiled Python bytecode and setuptools editable-install metadata
 __pycache__/
@@ -21,5 +22,7 @@ dist/
 # Ignore generated SARIF reports, harvested CSV datasets, and auto-built ONNX artifacts
 *.sarif
 data/*.csv
+data/*.json
 src/argus/data/*.onnx
 src/argus/data/*.json
+src/argus/data/*.npz

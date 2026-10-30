@@ -1,20 +1,17 @@
 """Typer CLI entry points: `argus check` and `argus rules`."""
 
-# Standard library imports for lazy module loading, CLI args, paths, and types
 import importlib
 import sys
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, NoReturn
 
-# Third-party CLI and terminal rendering libraries
 import typer
 from pydantic import ValidationError
 from rich.console import Console
 from rich.markup import escape
 from rich.table import Table
 
-# Internal package imports for simulation, rule execution, and report formatting
 from argus import __version__
 from argus.evm import (
     LiveRPCSimulator,
@@ -27,7 +24,6 @@ from argus.formatters import render_json_report, render_rich_report, render_sari
 from argus.models import LintReport, Severity
 from argus.rules import all_rules, compute_risk_score, run_rules
 
-# Initialize the root Typer CLI application
 app = typer.Typer(
     name="argus",
     help="Pre-sign security linter for unsigned EVM transactions.",
@@ -35,10 +31,8 @@ app = typer.Typer(
     add_completion=False,
 )
 
-# Dedicated stderr Rich console so operational errors never pollute stdout JSON/SARIF
 _err = Console(stderr=True)
 
-# Color mapping used when rendering severity labels in the terminal
 _SEVERITY_STYLE = {
     Severity.LOW: "cyan",
     Severity.MEDIUM: "yellow",
@@ -130,16 +124,13 @@ def check(
     ] = Severity.HIGH,
 ) -> None:
     """Load, decode, simulate, and lint a single unsigned EVM transaction payload."""
-    # Step 1: Parse and validate the raw JSON transaction file
     try:
         tx, raw = load_payload(payload_path)
     except PayloadError as exc:
         _fail(str(exc))
 
-    # Step 2: ABI-decode the 4-byte function selector and calldata arguments
     decoded = decode_calldata(tx.data)
 
-    # Step 3: Select either the deterministic offline simulator or hardened live RPC simulator
     try:
         if offline:
             simulator = OfflineFixtureSimulator(raw)
@@ -150,11 +141,9 @@ def check(
     except ValueError as exc:
         _fail(str(exc))
 
-    # Require the user to explicitly choose offline mode or provide an RPC endpoint
     if simulator is None:
         _fail("provide --rpc-url (or ARGUS_RPC_URL) for live simulation, or pass --offline.")
 
-    # Step 4: Run simulation to gather bytecode opcodes, metadata, and balance deltas
     try:
         ctx = simulator.simulate(tx, decoded)
     except ValidationError as exc:
@@ -162,7 +151,6 @@ def check(
     except Exception as exc:
         _fail(f"simulation failed ({type(exc).__name__}): {exc}")
 
-    # Step 5: Evaluate all deterministic rules (ARG001-ARG006) and sort highest severity first
     findings = run_rules(ctx)
     findings.sort(key=lambda f: (-f.severity.rank, f.rule_id))
     report = LintReport(
@@ -171,10 +159,8 @@ def check(
         passed=not any(f.severity.meets(fail_on) for f in findings),
     )
 
-    # Step 6: Optionally run ONNX inference + SHAP feature attribution if `--explain` is set
     if explain:
         try:
-            # Lazy import keeps core CLI usable even when optional `[ml]` packages aren't installed
             ml_scorer = importlib.import_module("argus.ml_scorer")
             report.ml_risk_score, report.shap_attributions = ml_scorer.explain(ctx, findings)
         except ImportError as exc:
@@ -185,7 +171,6 @@ def check(
         except Exception as exc:
             _fail(f"ML scoring failed ({type(exc).__name__}): {exc}")
 
-    # Step 7: Render the report in the requested format (Rich terminal UI, JSON, or SARIF)
     if output_format == OutputFormat.RICH:
         render_rich_report(report, ctx, Console())
     elif output_format == OutputFormat.JSON:
@@ -193,20 +178,18 @@ def check(
     else:
         typer.echo(render_sarif_report(report, artifact_uri=payload_path.as_posix()))
 
-    # Step 8: Return non-zero exit code 1 when findings violate the `--fail-on` threshold
     if not report.passed:
         raise typer.Exit(code=1)
 
 
 @app.command()
 def rules() -> None:
-    """Print a Rich table listing every registered TXL security rule and its severity."""
+    """Print a Rich table listing every registered ARGUS security rule and its severity."""
     table = Table(title="argus rules", show_lines=True)
     table.add_column("ID", no_wrap=True)
     table.add_column("Severity", no_wrap=True)
     table.add_column("Title")
     table.add_column("What it catches")
-    # Populate one row per registered rule in sorted ID order (ARG001..ARG006)
     for rule in all_rules():
         top = max(rule.severities, key=lambda sev: sev.rank)
         sev_cell = f"[{_SEVERITY_STYLE[top]}]{rule.severity_label}[/]"
