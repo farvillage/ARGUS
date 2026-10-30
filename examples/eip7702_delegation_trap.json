@@ -1,0 +1,32 @@
+{
+  "_description": "Type-4 transaction: the EOA delegates its code to an unverified contract using chain_id 0 (replayable on every chain).",
+  "chainId": 1,
+  "from": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc",
+  "to": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc",
+  "value": "0x0",
+  "data": "0x",
+  "authorizationList": [
+    {
+      "chainId": "0x0",
+      "address": "0xd3adb33fd3adb33fd3adb33fd3adb33fd3adb33f",
+      "nonce": "0x1",
+      "yParity": "0x0"
+    }
+  ],
+  "_mock_context": {
+    "is_contract": false,
+    "is_verified": false,
+    "block_timestamp": 1790000000,
+    "address_metadata": {
+      "0xd3adb33fd3adb33fd3adb33fd3adb33fd3adb33f": {
+        "is_contract": true,
+        "is_verified": false
+      }
+    },
+    "eth_delta_wei": 0,
+    "erc20_deltas": {},
+    "approvals_granted": [],
+    "call_depth": 1,
+    "reverted": false
+  }
+}

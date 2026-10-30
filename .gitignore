@@ -1,0 +1,25 @@
+# Ignore macOS Finder hidden folder metadata
+.DS_Store
+
+# Ignore local VS Code workspace preferences (keep repo IDE-neutral)
+.vscode/
+
+# Ignore the local Python virtual environment
+.venv/
+
+# Ignore compiled Python bytecode and setuptools editable-install metadata
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Ignore test runner and linter caches
+.pytest_cache/
+.ruff_cache/
+
+# Ignore generated SARIF reports, harvested CSV datasets, and auto-built ONNX artifacts
+*.sarif
+data/*.csv
+src/argus/data/*.onnx
+src/argus/data/*.json

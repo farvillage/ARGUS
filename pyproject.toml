@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "argus"
+version = "0.1.0"
+description = "Pre-sign security linter for unsigned EVM transactions: drainers, Permit phishing, EIP-7702 hijacks, dangerous bytecode."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+    { name = "Ygor Soares" },
+]
+keywords = ["web3", "evm", "security", "linter", "eip-7702", "wallet-drainer"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+dependencies = [
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "pydantic>=2.7.0",
+    "eth-abi>=5.0.0",
+    "eth-utils>=4.0.0",
+    "web3>=8.0.0",
+]
+
+[project.optional-dependencies]
+ml = [
+    "scikit-learn>=1.5.0",
+    "onnxruntime>=1.18.0",
+    "skl2onnx>=1.17.0",
+    "shap>=0.45.0",
+    "numpy>=1.26.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+]
+
+[project.scripts]
+argus = "argus.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+argus = ["data/*.onnx", "data/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101"]

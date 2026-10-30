@@ -1,0 +1,24 @@
+{
+  "_description": "Call into a 37-block-old unverified contract with non-standard DELEGATECALL + SELFDESTRUCT bytecode; ETH and USDC leave with nothing coming back.",
+  "chainId": 1,
+  "from": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc",
+  "to": "0xc0ffee00c0ffee00c0ffee00c0ffee00c0ffee00",
+  "value": "0x4563918244f40000",
+  "data": "0xe9ae5c53000000000000000000000000badc0de0badc0de0badc0de0badc0de0badc0de0",
+  "_mock_context": {
+    "is_contract": true,
+    "is_verified": false,
+    "deployment_age_blocks": 37,
+    "block_timestamp": 1790000000,
+    "runtime_bytecode": "0x600035600060006000600073bad0bad0bad0bad0bad0bad0bad0bad0bad0bad05af43d6000803e33ff",
+    "address_metadata": {},
+    "eth_delta_wei": -5000000000000000000,
+    "erc20_deltas": {
+      "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": -25000000000
+    },
+    "approvals_granted": [],
+    "receipt_tokens": [],
+    "call_depth": 3,
+    "reverted": false
+  }
+}

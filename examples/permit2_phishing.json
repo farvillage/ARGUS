@@ -1,0 +1,32 @@
+{
+  "_description": "Permit-signature phishing (EIP-2612 permit, the primitive ARG002 targets): unlimited allowance to an EOA spender, deadline in year 2100.",
+  "chainId": 1,
+  "from": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc",
+  "to": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  "value": "0x0",
+  "data": "0xd505accf0000000000000000000000003c44cdddb6a900fa2b585dd299e03d12fa4293bc000000000000000000000000badc0de0badc0de0badc0de0badc0de0badc0de0ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000000000000000000000000000000000000000000000000000f4865700000000000000000000000000000000000000000000000000000000000000001b11111111111111111111111111111111111111111111111111111111111111112222222222222222222222222222222222222222222222222222222222222222",
+  "_mock_context": {
+    "is_contract": true,
+    "is_verified": true,
+    "deployment_age_blocks": 15000000,
+    "block_timestamp": 1790000000,
+    "address_metadata": {
+      "0xbadc0de0badc0de0badc0de0badc0de0badc0de0": {
+        "is_contract": false,
+        "is_verified": false
+      }
+    },
+    "eth_delta_wei": 0,
+    "erc20_deltas": {},
+    "approvals_granted": [
+      {
+        "standard": "ERC-20",
+        "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+        "spender": "0xbadc0de0badc0de0badc0de0badc0de0badc0de0",
+        "amount": "unlimited"
+      }
+    ],
+    "call_depth": 1,
+    "reverted": false
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "_description": "Benign Uniswap SwapRouter02 exactInputSingle: 1 WETH -> USDC through a verified router with a balanced state diff.",
+  "chainId": 1,
+  "from": "0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc",
+  "to": "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45",
+  "value": "0x0",
+  "gas": "0x30d40",
+  "data": "0x04e45aaf000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc2000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb4800000000000000000000000000000000000000000000000000000000000001f40000000000000000000000003c44cdddb6a900fa2b585dd299e03d12fa4293bc0000000000000000000000000000000000000000000000000de0b6b3a764000000000000000000000000000000000000000000000000000000000000773594000000000000000000000000000000000000000000000000000000000000000000",
+  "_mock_context": {
+    "is_contract": true,
+    "is_verified": true,
+    "deployment_age_blocks": 15000000,
+    "block_timestamp": 1790000000,
+    "address_metadata": {
+      "0x68b3465833fb72a70ecdf485e0e4c7bd8665fc45": {
+        "is_contract": true,
+        "is_verified": true
+      }
+    },
+    "eth_delta_wei": 0,
+    "erc20_deltas": {
+      "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2": -1000000000000000000,
+      "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48": 2150000000
+    },
+    "approvals_granted": [],
+    "receipt_tokens": [],
+    "call_depth": 3,
+    "reverted": false
+  }
+}
