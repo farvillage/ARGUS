@@ -307,15 +307,3 @@ from triggering SSRF requests through EIP-3668.
 ## License
 
 MIT
-
-------------------------------------------------------------------------
-
-## Save and commit the README
-
-Save this content as `README.md`, then commit and push the update:
-
-``` bash
-git add README.md
-git commit -m "docs: update README with real-world DeFi-Hack-Chronicle harvesting and multi-model benchmark"
-git push
-```
